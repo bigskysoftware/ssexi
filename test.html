@@ -1,0 +1,1071 @@
+<html lang="en">
+<head>
+    <title>ssexi test suite</title>
+    <script>
+        let tests = [];
+        let currentTest = null;
+        let passed = 0;
+        let failed = 0;
+        let find = (selector) => currentTest.testElt.querySelector(selector);
+        function test(code){
+            let currentScript = document.currentScript;
+            let testElt = currentScript.closest('div');
+            tests.push(async ()=>{
+                currentTest.testElt = testElt;
+                try {
+                    await code();
+                    testElt.classList.add("passed");
+                    testElt.insertAdjacentHTML('beforeend', `<p>Passed</p>`)
+                    passed++;
+                    document.querySelector(".passed-info").querySelector("output").innerText = passed.toString();
+                } catch (e) {
+                    testElt.classList.add("failed");
+                    testElt.insertAdjacentHTML('beforeend', `<p>ERROR: ${e}</p>`)
+                    failed++;
+                    document.querySelector(".failed-info").querySelector("output").innerText = failed.toString();
+                } finally {
+                    currentTest = null;
+                }
+            })
+        }
+        function sleep(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+        }
+        function assertEq(actual, expected, trim) {
+            if (expected !== (trim ? actual?.trim() : actual)) {
+                console.error("Expected", expected, "found", actual);
+                throw `Expected ${expected} found ${actual}`
+            }
+        }
+        function sseResponse(...messages) {
+            let body = messages.map(m => {
+                if (typeof m === 'string') return `data: ${m}\n\n`;
+                let out = '';
+                if (m.event) out += `event: ${m.event}\n`;
+                if (m.id) out += `id: ${m.id}\n`;
+                if (m.retry) out += `retry: ${m.retry}\n`;
+                let data = m.data || '';
+                data.split('\n').forEach(line => out += `data: ${line}\n`);
+                return out + '\n';
+            }).join('');
+            let encoder = new TextEncoder();
+            let stream = new ReadableStream({
+                start(controller) {
+                    controller.enqueue(encoder.encode(body));
+                    controller.close();
+                }
+            });
+            return new Response(stream, {headers: {'Content-Type': 'text/event-stream'}});
+        }
+        function chunkedSSEResponse(...messages) {
+            let chunks = messages.map(m => {
+                if (typeof m === 'string') return `data: ${m}\n\n`;
+                let out = '';
+                if (m.event) out += `event: ${m.event}\n`;
+                if (m.id) out += `id: ${m.id}\n`;
+                let data = m.data || '';
+                data.split('\n').forEach(line => out += `data: ${line}\n`);
+                return out + '\n';
+            });
+            let encoder = new TextEncoder();
+            let i = 0;
+            let stream = new ReadableStream({
+                pull(controller) {
+                    if (i < chunks.length) controller.enqueue(encoder.encode(chunks[i++]));
+                    else controller.close();
+                }
+            });
+            return new Response(stream, {headers: {'Content-Type': 'text/event-stream'}});
+        }
+        // disable view transitions during tests
+        document.addEventListener("fx:config", (e) => e.detail.cfg.transition = false);
+        document.addEventListener('DOMContentLoaded', async () => {
+            for (let i = 0; i < document.querySelectorAll(".test").length; i++){
+                const testBlock = document.querySelectorAll(".test")[i];
+                testBlock.querySelector("h3").insertAdjacentHTML("beforeend", ` - <a id='test${i}' href="test.html?test${i}">run</a>`)
+                let scriptElt = testBlock.querySelector("script");
+                scriptElt.insertAdjacentHTML("beforebegin", `<b>Code:</b><pre></pre>`)
+                scriptElt.previousElementSibling.innerText = scriptElt.innerText.replaceAll(/^ {8}/gm, '') + "\n";
+                if (location.search.indexOf("?test") === 0) {
+                  let index = parseInt(location.search.substring(5));
+                  if (index !== i) {
+                    testBlock.setAttribute("fx-ignore", 'true');
+                  } else {
+                    testBlock.scrollIntoView()
+                  }
+                }
+            }
+            setTimeout(async ()=>{
+              for (let i = 0; i < tests.length; i++){
+                if (location.search.indexOf("?test") === 0) {
+                  let index = parseInt(location.search.substring(5));
+                  if (index !== i) continue;
+                }
+                currentTest = tests[i];
+                await currentTest();
+              }
+            })
+        });
+    </script>
+    <script src="https://cdn.jsdelivr.net/gh/bigskysoftware/fixi@0.9.3/fixi.js"></script>
+    <script src="ssexi.js"></script>
+    <style>
+        .test {
+            padding: 8px;
+            margin: 8px;
+        }
+        .passed {
+            border: 3px solid green;
+        }
+        .failed {
+            border: 3px solid red;
+        }
+        .passed-info {
+            color: green;
+        }
+        .failed-info {
+            color: red;
+        }
+        pre {
+            padding: 4px;
+            margin: 12px;
+            border: 1px solid rgb(128, 128, 128);
+            background-color: whitesmoke;
+        }
+        body.hide-passed .passed {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>&#x1F4E1; ssexi test suite</h1>
+    <div>
+        <div class="passed-info">Passed: <output></output></div>
+        <div class="failed-info">Failed: <output></output></div>
+        <a href="javascript:document.body.classList.toggle('hide-passed')">Toggle Passed</a><br/>
+        <a href="test.html">Run All</a>
+    </div>
+</header>
+
+<main>
+
+    <section id="headers">
+        <h2>Accept header</h2>
+
+        <div class="test">
+            <h3>ssexi adds Accept: text/html, text/event-stream by default</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#h1')
+                    let seen = null
+                    btn.addEventListener("fx:before", (e) => seen = e.detail.cfg.headers.Accept)
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(new Response("ok", {headers: {'Content-Type': 'text/html'}}))
+                    })
+                    btn.click()
+                    await sleep(30)
+                    assertEq(seen, "text/html, text/event-stream")
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#h1">go</button>
+            <div id="h1"></div>
+        </div>
+
+        <div class="test">
+            <h3>user-supplied Accept (set in fx:config) wins over the ssexi default</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#h2')
+                    let seen = null
+                    // a per-element fx:config listener fires in target phase, before ssexi's
+                    // document-level listener runs in bubble phase
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.headers.Accept = "application/custom"
+                        e.detail.cfg.fetch = () => Promise.resolve(new Response("ok", {headers: {'Content-Type': 'text/html'}}))
+                    })
+                    btn.addEventListener("fx:before", (e) => seen = e.detail.cfg.headers.Accept)
+                    btn.click()
+                    await sleep(30)
+                    assertEq(seen, "application/custom")
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#h2">go</button>
+            <div id="h2"></div>
+        </div>
+    </section>
+
+    <section id="basic">
+        <h2>Basic swap behaviour</h2>
+
+        <div class="test">
+            <h3>innerHTML swap: last message wins</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t1');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("hello", "world"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(target.innerHTML, "world");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t1">go</button>
+            <div id="t1"></div>
+        </div>
+
+        <div class="test">
+            <h3>beforeend swap: messages appended</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t2');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("<p>a</p>", "<p>b</p>"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(target.innerHTML, "<p>a</p><p>b</p>");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="beforeend" fx-target="#t2">go</button>
+            <div id="t2"></div>
+        </div>
+
+        <div class="test">
+            <h3>Non-SSE response falls through to normal fixi swap</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t11');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(new Response("<b>normal</b>", {headers: {'Content-Type': 'text/html'}}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(target.innerHTML, "<b>normal</b>");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t11">go</button>
+            <div id="t11"></div>
+        </div>
+
+        <div class="test">
+            <h3>Chunked delivery: all messages received</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t12');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(chunkedSSEResponse("x", "y", "z"));
+                    });
+                    btn.click();
+                    await sleep(80);
+                    assertEq(target.innerHTML, "xyz");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="beforeend" fx-target="#t12">go</button>
+            <div id="t12"></div>
+        </div>
+    </section>
+
+    <section id="parsing">
+        <h2>SSE message parsing</h2>
+
+        <div class="test">
+            <h3>Multiline data: lines joined by newline</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t9');
+                    let raw = "data: line1\ndata: line2\n\n";
+                    let encoder = new TextEncoder();
+                    let stream = new ReadableStream({ start(c) { c.enqueue(encoder.encode(raw)); c.close() } });
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(new Response(stream, {headers: {'Content-Type': 'text/event-stream'}}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(target.innerHTML, "line1\nline2");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t9">go</button>
+            <div id="t9"></div>
+        </div>
+
+        <div class="test">
+            <h3>Comments (`:` prefix lines) are ignored</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t10');
+                    let raw = ": this is a comment\ndata: real\n\n";
+                    let encoder = new TextEncoder();
+                    let stream = new ReadableStream({ start(c) { c.enqueue(encoder.encode(raw)); c.close() } });
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(new Response(stream, {headers: {'Content-Type': 'text/event-stream'}}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(target.innerHTML, "real");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t10">go</button>
+            <div id="t10"></div>
+        </div>
+    </section>
+
+    <section id="events">
+        <h2>Lifecycle events</h2>
+
+        <div class="test">
+            <h3>fx:sse:open fires on target</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t5');
+                    let opened = false;
+                    target.addEventListener("fx:sse:open", () => opened = true);
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("hi"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(opened, true);
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t5">go</button>
+            <div id="t5"></div>
+        </div>
+
+        <div class="test">
+            <h3>fx:sse:close fires on target</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t6');
+                    let closed = false;
+                    target.addEventListener("fx:sse:close", () => closed = true);
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("bye"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(closed, true);
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t6">go</button>
+            <div id="t6"></div>
+        </div>
+
+        <div class="test">
+            <h3>fx:sse:swapped fires after each swap with the new content visible</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t6b');
+                    let observed = [];
+                    target.addEventListener("fx:sse:swapped", () => observed.push(target.innerHTML));
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("a", "b", "c"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    // each fx:sse:swapped event should already see the appended content
+                    assertEq(observed.length, 3);
+                    assertEq(observed[0], "a");
+                    assertEq(observed[1], "ab");
+                    assertEq(observed[2], "abc");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="beforeend" fx-target="#t6b">go</button>
+            <div id="t6b"></div>
+        </div>
+
+        <div class="test">
+            <h3>Cancelling fx:sse:open stops the swap</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t7');
+                    target.addEventListener("fx:sse:open", (e) => e.preventDefault());
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("nope"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(target.innerHTML, "");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t7">go</button>
+            <div id="t7"></div>
+        </div>
+
+        <div class="test">
+            <h3>Cancelling fx:sse:message stops subsequent messages</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t8');
+                    let count = 0;
+                    target.addEventListener("fx:sse:message", (e) => {
+                        count++;
+                        if (count >= 2) e.preventDefault();
+                    });
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("a", "b", "c"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(target.innerHTML, "a");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="beforeend" fx-target="#t8">go</button>
+            <div id="t8"></div>
+        </div>
+    </section>
+
+    <section id="named-events">
+        <h2>Named events</h2>
+
+        <div class="test">
+            <h3>Named event dispatches fx:sse:&lt;name&gt; and is not swapped</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t3');
+                    let eventData = null;
+                    target.addEventListener("fx:sse:status", (e) => { eventData = e.detail.message.data });
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse({event: "status", data: "ok"}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(eventData, "ok");
+                    assertEq(target.innerHTML, "");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t3">go</button>
+            <div id="t3"></div>
+        </div>
+
+        <div class="test">
+            <h3>Mixed named + unnamed: only unnamed swapped</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t4');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse(
+                            "<p>1</p>",
+                            {event: "ping", data: "skip"},
+                            "<p>2</p>"
+                        ));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(target.innerHTML, "<p>1</p><p>2</p>");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="beforeend" fx-target="#t4">go</button>
+            <div id="t4"></div>
+        </div>
+
+        <div class="test">
+            <h3>Regular named events dispatch with full data</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t24');
+                    let eventData = null;
+                    target.addEventListener("fx:sse:notify", (e) => eventData = e.detail.message.data);
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse({event: "notify", data: "hello"}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(eventData, "hello");
+                    assertEq(target.innerHTML, "");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t24">go</button>
+            <div id="t24"></div>
+        </div>
+    </section>
+
+    <section id="state">
+        <h2>Message state tracking</h2>
+
+        <div class="test">
+            <h3>message.id passed to fx:sse:message event</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t14');
+                    let lastId = null;
+                    target.addEventListener("fx:sse:message", (e) => lastId = e.detail.message.id);
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse({data: "hi", id: "42"}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(lastId, "42");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t14">go</button>
+            <div id="t14"></div>
+        </div>
+
+        <div class="test">
+            <h3>cfg.sse.lastEventId tracks last seen id</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t15');
+                    let sseState = null;
+                    target.addEventListener("fx:sse:close", (e) => sseState = e.detail.cfg.sse);
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse(
+                            {data: "a", id: "1"},
+                            {data: "b", id: "2"},
+                            {data: "c", id: "3"}
+                        ));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(sseState?.lastEventId, "3");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t15">go</button>
+            <div id="t15"></div>
+        </div>
+
+        <div class="test">
+            <h3>cfg.sse.retry tracks server retry hint</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t16');
+                    let sseState = null;
+                    target.addEventListener("fx:sse:close", (e) => sseState = e.detail.cfg.sse);
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse({data: "hi", retry: 3000}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(sseState?.retry, 3000);
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t16">go</button>
+            <div id="t16"></div>
+        </div>
+
+        <div class="test">
+            <h3>Standalone retry: tracked on cfg.sse, data still swapped</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t19');
+                    let sseState = null;
+                    target.addEventListener("fx:sse:close", (e) => sseState = e.detail.cfg.sse);
+                    let raw = "retry: 5000\n\ndata: hello\n\n";
+                    let encoder = new TextEncoder();
+                    let stream = new ReadableStream({ start(c) { c.enqueue(encoder.encode(raw)); c.close() } });
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(new Response(stream, {headers: {'Content-Type': 'text/event-stream'}}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(sseState?.retry, 5000);
+                    assertEq(target.innerHTML, "hello");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t19">go</button>
+            <div id="t19"></div>
+        </div>
+
+        <div class="test">
+            <h3>Standalone id: tracked on cfg.sse, no spurious swap</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t20');
+                    let sseState = null;
+                    target.addEventListener("fx:sse:close", (e) => sseState = e.detail.cfg.sse);
+                    let raw = "id: seed-99\n\ndata: content\n\n";
+                    let encoder = new TextEncoder();
+                    let stream = new ReadableStream({ start(c) { c.enqueue(encoder.encode(raw)); c.close() } });
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(new Response(stream, {headers: {'Content-Type': 'text/event-stream'}}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(sseState?.lastEventId, "seed-99");
+                    assertEq(target.innerHTML, "content");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t20">go</button>
+            <div id="t20"></div>
+        </div>
+
+        <div class="test">
+            <h3>cfg.sse.reader is exposed and supports cancellation</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t17');
+                    let readerRef = null;
+                    currentTest.testElt.addEventListener("fx:sse:open", (e) => {
+                        readerRef = e.detail.cfg.sse.reader;
+                    }, {once: true});
+                    let encoder = new TextEncoder();
+                    let i = 0;
+                    let chunks = ["data: a\n\n", "data: b\n\n", "data: c\n\n"];
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => {
+                            let stream = new ReadableStream({
+                                async pull(controller) {
+                                    await new Promise(r => setTimeout(r, 20));
+                                    if (i < chunks.length) controller.enqueue(encoder.encode(chunks[i++]));
+                                    else controller.close();
+                                }
+                            });
+                            return Promise.resolve(new Response(stream, {headers: {'Content-Type': 'text/event-stream'}}));
+                        };
+                    });
+                    btn.click();
+                    await sleep(30);
+                    if (readerRef == null) throw "cfg.sse.reader was not exposed";
+                    readerRef.cancel();
+                    await sleep(120);
+                    if (target.innerHTML.length >= 3) throw `expected partial content, got "${target.innerHTML}"`;
+                })
+            </script>
+            <button fx-action="/test" fx-swap="beforeend" fx-target="#t17">go</button>
+            <div id="t17"></div>
+        </div>
+    </section>
+
+    <section id="outer-html">
+        <h2>outerHTML streaming</h2>
+
+        <div class="test">
+            <h3>outerHTML: first message replaces, rest append after</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("<b>first</b>", "<i>second</i>", "<u>third</u>"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    if (find('#t13')) throw "#t13 should have been replaced";
+                    let html = currentTest.testElt.innerHTML;
+                    if (!html.includes("<b>first</b><i>second</i><u>third</u>")) {
+                        throw `expected replacement + appended content, got "${html}"`;
+                    }
+                })
+            </script>
+            <button fx-action="/test" fx-swap="outerHTML" fx-target="#t13">go</button>
+            <div id="t13">original</div>
+        </div>
+
+        <div class="test">
+            <h3>outerHTML: single message just replaces</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("<span>replaced</span>"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    if (find('#t13b')) throw "#t13b should have been replaced";
+                    if (!currentTest.testElt.innerHTML.includes("<span>replaced</span>")) {
+                        throw `expected replacement content, got "${currentTest.testElt.innerHTML}"`;
+                    }
+                })
+            </script>
+            <button fx-action="/test" fx-swap="outerHTML" fx-target="#t13b">go</button>
+            <div id="t13b">original</div>
+        </div>
+
+        <div class="test">
+            <h3>outerHTML: message and close events bubble to ancestors</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button');
+                    let msgCount = 0, closeFired = false;
+                    currentTest.testElt.addEventListener("fx:sse:message", () => msgCount++);
+                    currentTest.testElt.addEventListener("fx:sse:close", () => closeFired = true, {once: true});
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse("<b>a</b>", "<b>b</b>"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    if (msgCount < 2) throw `expected >=2 message events, got ${msgCount}`;
+                    assertEq(closeFired, true);
+                })
+            </script>
+            <button fx-action="/test" fx-swap="outerHTML" fx-target="#t18">go</button>
+            <div id="t18">original</div>
+        </div>
+    </section>
+
+    <section id="json-events">
+        <h2>JSON-encoded event names</h2>
+
+        <div class="test">
+            <h3>JSON event with target: swaps into specified element</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), main = find('#t21'), other = find('#t21-other');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse({event: '{"target":"#t21-other"}', data: "routed"}, "default"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(other.innerHTML, "routed");
+                    assertEq(main.innerHTML, "default");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t21">go</button>
+            <div id="t21"></div>
+            <div id="t21-other"></div>
+        </div>
+
+        <div class="test">
+            <h3>JSON event with target + swap: uses custom swap mode</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), main = find('#t22'), side = find('#t22-side');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse({event: '{"target":"#t22-side","swap":"beforeend"}', data: "+more"}, "main"));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(side.innerHTML, "existing+more");
+                    assertEq(main.innerHTML, "main");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t22">go</button>
+            <div id="t22"></div>
+            <div id="t22-side">existing</div>
+        </div>
+
+        <div class="test">
+            <h3>JSON event: does not dispatch a named fx:sse:&lt;json&gt; event</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button');
+                    let namedFired = false;
+                    currentTest.testElt.addEventListener("fx:sse:{", () => namedFired = true, {once: true});
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse({event: '{"target":"#t23-dest"}', data: "hi"}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(find('#t23-dest').innerHTML, "hi");
+                    assertEq(namedFired, false);
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t23">go</button>
+            <div id="t23"></div>
+            <div id="t23-dest"></div>
+        </div>
+
+        <div class="test">
+            <h3>JSON event: fx:sse:swapped fires on the routed target, not the original</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), main = find('#t24'), dest = find('#t24-dest');
+                    let dispatchedOn = [];
+                    main.addEventListener("fx:sse:swapped", (e) => dispatchedOn.push("main:" + e.target.id));
+                    dest.addEventListener("fx:sse:swapped", (e) => dispatchedOn.push("dest:" + e.target.id));
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse({event: '{"target":"#t24-dest"}', data: "x"}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    // event must fire on #t24-dest (the routed target) so a listener attached
+                    // there sees it directly. Bubbling through #t24 (the original cfg.target)
+                    // would be wrong because they're not ancestors.
+                    assertEq(dispatchedOn.length, 1);
+                    assertEq(dispatchedOn[0], "dest:t24-dest");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t24">go</button>
+            <div id="t24"></div>
+            <div id="t24-dest"></div>
+        </div>
+
+        <div class="test">
+            <h3>JSON events fan one stream out to multiple targets with per-message swap modes</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button');
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse(
+                            {event: '{"target":"#t25-clock"}',                  data: "12:00:00"},
+                            {event: '{"target":"#t25-log","swap":"beforeend"}', data: "<i>a</i>"},
+                            {event: '{"target":"#t25-clock"}',                  data: "12:00:01"},
+                            {event: '{"target":"#t25-log","swap":"beforeend"}', data: "<i>b</i>"},
+                            {event: '{"target":"#t25-log","swap":"beforeend"}', data: "<i>c</i>"},
+                        ));
+                    });
+                    btn.click();
+                    await sleep(80);
+                    // last clock value wins via innerHTML (the connection's default swap)
+                    assertEq(find('#t25-clock').innerHTML, "12:00:01");
+                    // log accumulates via per-message beforeend
+                    assertEq(find('#t25-log').innerHTML, "<i>a</i><i>b</i><i>c</i>");
+                    // the original cfg.target (#t25) was never written to
+                    assertEq(find('#t25').innerHTML, "");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t25">go</button>
+            <div id="t25"></div>
+            <div id="t25-clock"></div>
+            <div id="t25-log"></div>
+        </div>
+
+        <div class="test">
+            <h3>JSON event with transition:true wraps the swap in cfg.transition()</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t26');
+                    let txCalls = 0;
+                    // use fx:before; fx:config has a global handler at the top of the file
+                    // that resets cfg.transition to false, which would clobber our stub
+                    btn.addEventListener("fx:before", (e) => {
+                        e.detail.cfg.transition = (fn) => { txCalls++; fn(); return { finished: Promise.resolve() } };
+                    });
+                    // null out before fixi's outer doSwap wrap fires so we count only ssexi calls
+                    btn.addEventListener("fx:after", (e) => e.detail.cfg.transition = null);
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse(
+                            "no-tx",
+                            {event: '{"transition":true}', data: "tx"},
+                        ));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    // first frame: no transition wrapper. second frame: transition wrapper called exactly once.
+                    assertEq(txCalls, 1);
+                    assertEq(target.innerHTML, "tx");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="innerHTML" fx-target="#t26">go</button>
+            <div id="t26"></div>
+        </div>
+
+        <div class="test">
+            <h3>JSON event with only transition:true preserves the default target and swap</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), main = find('#t27'), other = find('#t27-other');
+                    btn.addEventListener("fx:before", (e) => {
+                        e.detail.cfg.transition = (fn) => { fn(); return { finished: Promise.resolve() } };
+                    });
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse(
+                            {event: '{"transition":true}', data: "+wrapped"},
+                        ));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    // no target in the JSON, so cfg.target (#t27) gets the swap with the default style (beforeend)
+                    assertEq(main.innerHTML, "+wrapped");
+                    assertEq(other.innerHTML, "");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="beforeend" fx-target="#t27">go</button>
+            <div id="t27"></div>
+            <div id="t27-other"></div>
+        </div>
+
+        <div class="test">
+            <h3>JSON event without transition does NOT call cfg.transition()</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#t28');
+                    let txCalls = 0;
+                    btn.addEventListener("fx:before", (e) => {
+                        e.detail.cfg.transition = (fn) => { txCalls++; fn(); return { finished: Promise.resolve() } };
+                    });
+                    btn.addEventListener("fx:after", (e) => e.detail.cfg.transition = null);
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => Promise.resolve(sseResponse(
+                            {event: '{"swap":"innerHTML"}', data: "plain"},
+                        ));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    assertEq(txCalls, 0);
+                    assertEq(target.innerHTML, "plain");
+                })
+            </script>
+            <button fx-action="/test" fx-swap="beforeend" fx-target="#t28">go</button>
+            <div id="t28"></div>
+        </div>
+    </section>
+
+    <section id="reconnect">
+        <h2>Reconnect and pauseOnHidden</h2>
+
+        <div class="test">
+            <h3>no reconnect by default: fetch called once when stream closes</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#rc1');
+                    let calls = 0;
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.fetch = () => { calls++; return Promise.resolve(sseResponse("hi")) };
+                    });
+                    btn.click();
+                    await sleep(120);
+                    assertEq(calls, 1);
+                    assertEq(target.innerHTML, "hi");
+                })
+            </script>
+            <button fx-action="/stream" fx-swap="innerHTML" fx-target="#rc1">go</button>
+            <div id="rc1"></div>
+        </div>
+
+        <div class="test">
+            <h3>sseReconnect reconnects with Last-Event-ID after close</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#rc2');
+                    let calls = 0, lastHeader = null;
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.sseReconnect = true;
+                        e.detail.cfg.fetch = (url, opts) => {
+                            calls++;
+                            lastHeader = new Headers(opts.headers).get('Last-Event-ID');
+                            if (calls === 1) return Promise.resolve(sseResponse({data: "a", id: "7", retry: 10}));
+                            e.detail.cfg.sse.close();
+                            return Promise.resolve(sseResponse("b"));
+                        };
+                    });
+                    btn.click();
+                    await sleep(200);
+                    assertEq(calls, 2);
+                    assertEq(lastHeader, "7");
+                })
+            </script>
+            <button fx-action="/stream" fx-swap="innerHTML" fx-target="#rc2">go</button>
+            <div id="rc2"></div>
+        </div>
+
+        <div class="test">
+            <h3>sse.close() stops reconnect loop</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#rc3');
+                    let calls = 0;
+                    target.addEventListener("fx:sse:message", (e) => e.detail.cfg.sse.close(), {once: true});
+                    btn.addEventListener("fx:config", (e) => {
+                        e.detail.cfg.sseReconnect = true;
+                        e.detail.cfg.fetch = () => {
+                            calls++;
+                            return Promise.resolve(sseResponse({data: "x", retry: 10}));
+                        };
+                    });
+                    btn.click();
+                    await sleep(150);
+                    assertEq(calls, 1);
+                })
+            </script>
+            <button fx-action="/stream" fx-swap="innerHTML" fx-target="#rc3">go</button>
+            <div id="rc3"></div>
+        </div>
+
+        <div class="test">
+            <h3>sseDisconnectOnHidden closes stream on visibilitychange</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#rc4');
+                    let cfgRef;
+                    btn.addEventListener("fx:config", (e) => {
+                        cfgRef = e.detail.cfg;
+                        e.detail.cfg.sseDisconnectOnHidden = true;
+                        e.detail.cfg.sseReconnect = true;
+                        e.detail.cfg.fetch = () => Promise.resolve(chunkedSSEResponse({data: "keep", retry: 10}));
+                    });
+                    btn.click();
+                    await sleep(50);
+                    let origHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+                    Object.defineProperty(document, 'hidden', {value: true, configurable: true});
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await sleep(50);
+                    let closed = cfgRef.sse?.closed;
+                    if (origHidden) Object.defineProperty(document, 'hidden', origHidden);
+                    else delete document.hidden;
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    assertEq(closed, true);
+                })
+            </script>
+            <button fx-action="/stream" fx-swap="beforeend" fx-target="#rc4">go</button>
+            <div id="rc4"></div>
+        </div>
+
+        <div class="test">
+            <h3>ssePauseOnHidden does NOT close the stream on hidden (just pauses)</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#rc5');
+                    let cfgRef;
+                    btn.addEventListener("fx:config", (e) => {
+                        cfgRef = e.detail.cfg;
+                        e.detail.cfg.ssePauseOnHidden = true;
+                        e.detail.cfg.fetch = () => Promise.resolve(chunkedSSEResponse({data: "keep", retry: 10}));
+                    });
+                    btn.click();
+                    await sleep(60);
+                    let origHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+                    Object.defineProperty(document, 'hidden', {value: true, configurable: true});
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await sleep(50);
+                    let closedDuringHide = cfgRef.sse?.closed;
+                    if (origHidden) Object.defineProperty(document, 'hidden', origHidden);
+                    else delete document.hidden;
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await sleep(30);
+                    cfgRef.sse.close();
+                    assertEq(closedDuringHide, false);
+                })
+            </script>
+            <button fx-action="/stream" fx-swap="beforeend" fx-target="#rc5">go</button>
+            <div id="rc5"></div>
+        </div>
+
+        <div class="test">
+            <h3>ssePauseOnHidden reconnects with Last-Event-ID when visible</h3>
+            <script>
+                test(async () => {
+                    let btn = find('button'), target = find('#rc6');
+                    let calls = 0, resumeHeader = null, cfgRef;
+                    btn.addEventListener("fx:config", (e) => {
+                        cfgRef = e.detail.cfg;
+                        e.detail.cfg.ssePauseOnHidden = true;
+                        e.detail.cfg.fetch = (url, opts) => {
+                            calls++;
+                            if (calls === 1) {
+                                // long-lived stream: emit one message with id, stay open until cancelled
+                                let stream = new ReadableStream({
+                                    start(c) { c.enqueue(new TextEncoder().encode("data: a\nid: 11\n\n")) }
+                                });
+                                return Promise.resolve(new Response(stream, {headers: {'Content-Type': 'text/event-stream'}}));
+                            }
+                            resumeHeader = new Headers(opts.headers).get('Last-Event-ID');
+                            cfgRef.sse.close();
+                            return Promise.resolve(sseResponse("b"));
+                        };
+                    });
+                    btn.click();
+                    await sleep(60);
+                    let origHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+                    Object.defineProperty(document, 'hidden', {value: true, configurable: true});
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await sleep(40);
+                    if (origHidden) Object.defineProperty(document, 'hidden', origHidden);
+                    else delete document.hidden;
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await sleep(100);
+                    assertEq(calls, 2);
+                    assertEq(resumeHeader, "11");
+                })
+            </script>
+            <button fx-action="/stream" fx-swap="beforeend" fx-target="#rc6">go</button>
+            <div id="rc6"></div>
+        </div>
+    </section>
+
+</main>
+
+</body>
+</html>
