@@ -9,11 +9,11 @@ fi
 
 VERSION="$1"
 
-echo "Releasing ssexi-js v${VERSION}..."
+echo "Releasing @bigskysoftware/ssexi-js v${VERSION}..."
 
 cat > package.json <<EOF
 {
-  "name": "ssexi-js",
+  "name": "@bigskysoftware/ssexi-js",
   "version": "${VERSION}",
   "description": "ssexi.js - A Small SSE Streaming Companion for fixi.js",
   "main": "ssexi.js",
@@ -48,4 +48,4 @@ npm publish --access public
 
 rm package.json
 
-echo "Published ssexi-js@${VERSION} to npm"
+echo "Published @bigskysoftware/ssexi-js@${VERSION} to npm"
