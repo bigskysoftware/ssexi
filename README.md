@@ -247,47 +247,14 @@ ones to abort.
 
 ssexi fires the following events on the **target element**. All events bubble, are composed, and are cancelable.
 
-<table>
-<thead>
-<tr>
-  <th>event</th>
-  <th>detail</th>
-  <th>description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="#fxsseopen"><code>fx:sse:open</code></a></td>
-<td><code>cfg</code>, <code>response</code></td>
-<td>Fired when an SSE stream is detected.  Cancel to prevent processing.</td>
-</tr>
-<tr>
-<td><a href="#fxssemessage"><code>fx:sse:message</code></a></td>
-<td><code>cfg</code>, <code>message</code></td>
-<td>Fired for every SSE message <i>before</i> swapping.  Cancel to stop the stream.</td>
-</tr>
-<tr>
-<td><a href="#fxsseswapped"><code>fx:sse:swapped</code></a></td>
-<td><code>cfg</code>, <code>message</code></td>
-<td>Fired <i>after</i> a message's content has been swapped into the target.  Use this for post-swap reactions like auto-scroll.</td>
-</tr>
-<tr>
-<td><a href="#fxsseeventname"><code>fx:sse:{eventName}</code></a></td>
-<td><code>cfg</code>, <code>message</code></td>
-<td>Fired for messages with an <code>event:</code> field.  These are <b>not</b> swapped.</td>
-</tr>
-<tr>
-<td><a href="#fxsseclose"><code>fx:sse:close</code></a></td>
-<td><code>cfg</code></td>
-<td>Fired when the stream ends normally.</td>
-</tr>
-<tr>
-<td><a href="#fxsseerror"><code>fx:sse:error</code></a></td>
-<td><code>cfg</code>, <code>error</code></td>
-<td>Fired if an error occurs during streaming.</td>
-</tr>
-</tbody>
-</table>
+| event | detail | description |
+| --- | --- | --- |
+| [`fx:sse:open`](#fxsseopen) | `cfg`, `response` | Fired when an SSE stream is detected. Cancel to prevent processing. |
+| [`fx:sse:message`](#fxssemessage) | `cfg`, `message` | Fired for every SSE message _before_ swapping. Cancel to stop the stream. |
+| [`fx:sse:swapped`](#fxsseswapped) | `cfg`, `message` | Fired _after_ a message's content has been swapped into the target. Use this for post-swap reactions like auto-scroll. |
+| [`fx:sse:{eventName}`](#fxsseeventname) | `cfg`, `message` | Fired for messages with an `event:` field. These are **not** swapped. |
+| [`fx:sse:close`](#fxsseclose) | `cfg` | Fired when the stream ends normally. |
+| [`fx:sse:error`](#fxsseerror) | `cfg`, `error` | Fired if an error occurs during streaming. |
 
 ### `fx:sse:open`
 
