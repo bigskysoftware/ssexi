@@ -68,7 +68,7 @@ You can also use the JSDelivr CDN for local development or testing:
 <script src="https://cdn.jsdelivr.net/gh/bigskysoftware/ssexi@master/ssexi.js"></script>
 ```
 
-Finally, ssexi is available on NPM as the [`ssexi`](https://www.npmjs.com/package/ssexi) package.
+Finally, ssexi is available on NPM as the [`@bigskysoftware/ssexi-js`](https://www.npmjs.com/package/@bigskysoftware/ssexi-js) package.
 
 ## Support
 
