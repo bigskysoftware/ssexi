@@ -58,14 +58,14 @@ ssexi is designed to be easily [vendored](https://htmx.org/essays/vendoring/), t
 alongside your copy of fixi:
 
 ```bash
-curl https://raw.githubusercontent.com/bigskysoftware/ssexi/refs/heads/main/ssexi.js >> ssexi.js
+curl https://raw.githubusercontent.com/bigskysoftware/ssexi/refs/heads/master/ssexi.js >> ssexi.js
 ```
 
 You can also use the JSDelivr CDN for local development or testing:
 
 ```html
 
-<script src="https://cdn.jsdelivr.net/gh/bigskysoftware/ssexi@main/ssexi.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/bigskysoftware/ssexi@master/ssexi.js"></script>
 ```
 
 Finally, ssexi is available on NPM as the [`ssexi`](https://www.npmjs.com/package/ssexi) package.
